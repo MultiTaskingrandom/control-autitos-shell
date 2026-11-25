@@ -26,6 +26,12 @@
   .mid { display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; font-size:13px; color:var(--mut); }
   #bat { font-size:22px; color:var(--txt); }
   #log { font-size:11px; color:var(--mut); padding:4px 16px 8px; min-height:18px; font-family:monospace; }
+  @media (orientation:portrait) {
+    main { flex-wrap:wrap; justify-content:space-around; align-content:center; }
+    .mid { order:-1; width:100%; }
+    .btn { width:min(24vw,110px); height:min(24vw,110px); }
+  }
+  #log { white-space:normal; word-break:break-word; }
   #nobt { display:none; background:#5a1a1a; padding:10px 16px; font-size:14px; }
 </style>
 </head>
@@ -113,14 +119,22 @@ async function tick() {
 async function connect() {
   if (dev && dev.gatt.connected) { dev.gatt.disconnect(); return; }
   try {
+    // Sin filtro de nombre: los modelos nuevos (2023+) no siempre usan "SL-"/"QCAR-"
     dev = await navigator.bluetooth.requestDevice({
-      filters: [{namePrefix:'SL-'}, {namePrefix:'QCAR-'}, {services:[SVC_FFF0]}],
+      acceptAllDevices: true,
       optionalServices: [SVC_FFF0, SVC_BAT]
     });
     dev.addEventListener('gattserverdisconnected', onDisc);
     $('status').textContent = 'Conectando…';
+    log('Conectando a ' + (dev.name || 'sin nombre') + '…');
     const srv = await dev.gatt.connect();
-    const svc = await srv.getPrimaryService(SVC_FFF0);
+    let svc;
+    try { svc = await srv.getPrimaryService(SVC_FFF0); }
+    catch {
+      const all = await srv.getPrimaryServices().catch(() => []);
+      throw new Error((dev.name || 'Equipo') + ' no tiene el servicio FFF0. Servicios: ' +
+        (all.map(s => s.uuid.slice(4, 8)).join(', ') || 'ninguno visible') + '. ¿Elegiste el autito correcto?');
+    }
 
     // Detecta generación por las características disponibles
     try { ctl = await svc.getCharacteristic(CHR_FFF1); gen = 'A'; }
@@ -153,7 +167,12 @@ async function connect() {
     $('connect').textContent = 'Desconectar';
     log('Listo. Generación ' + gen);
     timer = setInterval(tick, gen === 'A' ? 100 : 50);
-  } catch (e) { log('No se pudo conectar: ' + e.message); onDisc(); }
+  } catch (e) {
+    const m = e.name === 'NotFoundError'
+      ? 'No elegiste ningún equipo. Si la lista está vacía: activá Ubicación, cerrá la app Shell y prendé/apagá el autito.'
+      : 'No se pudo conectar: ' + e.message;
+    log(m); if (dev && dev.gatt.connected) dev.gatt.disconnect(); onDisc();
+  }
 }
 
 function onDisc() {
