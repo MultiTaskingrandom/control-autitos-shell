@@ -24,18 +24,40 @@
          border-radius:20px; border:3px solid #444; display:flex; align-items:center; justify-content:center; }
   .btn.act { background:var(--red); border-color:var(--yellow); }
   .mid { display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; font-size:13px; color:var(--mut); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
   #bat { font-size:22px; color:var(--txt); }
-  #log { font-size:11px; color:var(--mut); padding:4px 16px 8px; min-height:18px; font-family:monospace; }
+  #drive { font-size:15px; color:var(--yellow); min-height:20px; font-weight:600; }
+  .modes { display:flex; background:#222; border-radius:12px; padding:3px; }
+  .modes button { background:transparent; color:var(--mut); padding:7px 12px; }
+  .modes button.on { background:var(--red); color:#fff; }
+  .spd { display:flex; align-items:center; gap:8px; color:var(--txt); }
+  .spd input { width:150px; accent-color:var(--yellow); }
+  .area { flex:1; display:none; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
+  .ring { width:min(62vmin,280px); height:min(62vmin,280px); border-radius:50%; background:#1e1e1e;
+          border:3px solid #444; position:relative; touch-action:none; }
+  .ring::before, .ring::after { content:''; position:absolute; background:#333; }
+  .ring::before { left:50%; top:8%; bottom:8%; width:2px; margin-left:-1px; }
+  .ring::after { top:50%; left:8%; right:8%; height:2px; margin-top:-1px; }
+  .ring.act { border-color:var(--yellow); }
+  .knob { position:absolute; left:50%; top:50%; width:34%; height:34%; margin:-17% 0 0 -17%; border-radius:50%;
+          background:var(--red); border:3px solid var(--yellow); z-index:1; pointer-events:none; }
+  #tiltRing .knob { width:22%; height:22%; margin:-11% 0 0 -11%; }
+  #tiltRing:not(.act) .knob { background:#555; border-color:#777; }
+  .hint { font-size:12px; color:var(--mut); text-align:center; }
+  body[data-mode="joy"] .ctl-btn, body[data-mode="tilt"] .ctl-btn { display:none; }
+  body[data-mode="joy"] #areaJoy, body[data-mode="tilt"] #areaTilt { display:flex; }
+  body:not([data-mode="btn"]) .kbd { display:none; }
+  #log { font-size:11px; color:var(--mut); padding:4px 16px 8px; min-height:18px; font-family:monospace; white-space:normal; word-break:break-word; }
   @media (orientation:portrait) {
     main { flex-wrap:wrap; justify-content:space-around; align-content:center; }
     .mid { order:-1; width:100%; }
     .btn { width:min(24vw,110px); height:min(24vw,110px); }
+    .area { flex-basis:100%; }
   }
-  #log { white-space:normal; word-break:break-word; }
   #nobt { display:none; background:#5a1a1a; padding:10px 16px; font-size:14px; }
 </style>
 </head>
-<body>
+<body data-mode="btn">
 <div id="nobt">Este navegador no soporta Web Bluetooth. Usá Chrome o Edge (Android / Windows / Mac). En iPhone, la app "Bluefy".</div>
 <header>
   <h1>🏎️ Autitos Shell</h1>
@@ -43,19 +65,46 @@
   <button class="top" id="connect">Conectar</button>
 </header>
 <main>
-  <div class="pad v">
+  <div class="pad v ctl-btn">
     <div class="btn" data-k="fwd">▲</div>
     <div class="btn" data-k="back">▼</div>
   </div>
+
+  <div class="area" id="areaJoy">
+    <div class="ring" id="joy"><div class="knob"></div></div>
+    <div class="hint">Arrastrá: arriba/abajo acelera, izquierda/derecha dobla</div>
+  </div>
+
+  <div class="area" id="areaTilt">
+    <div class="ring" id="tiltRing"><div class="knob"></div></div>
+    <div class="hint" id="tiltHint">Mantené apretado el círculo para manejar inclinando el celu</div>
+    <div class="row">
+      <button class="tog" id="calib">Calibrar</button>
+      <button class="tog" id="invS">Invertir giro</button>
+      <button class="tog" id="invT">Invertir acel.</button>
+    </div>
+  </div>
+
   <div class="mid">
     <div id="bat">🔋 --</div>
     <div id="model">—</div>
-    <button class="tog" id="turbo">Turbo (Espacio)</button>
-    <button class="tog" id="lights">Luces (L)</button>
-    <button class="tog" id="donut" hidden>Trompo (T)</button>
-    <div>Teclado: W/S o ↑/↓ · A/D o ←/→</div>
+    <div id="drive">Detenido</div>
+    <div class="modes">
+      <button data-m="btn">Botones</button>
+      <button data-m="joy">Joystick</button>
+      <button data-m="tilt">Inclinación</button>
+    </div>
+    <label class="spd">Velocidad <input type="range" id="spd" min="30" max="100" step="5" value="80"> <b id="spdv">80%</b></label>
+    <div class="row">
+      <button class="tog" id="turbo">Turbo (Espacio)</button>
+      <button class="tog" id="lights">Luces (L)</button>
+      <button class="tog" id="donut" hidden>Trompo (T)</button>
+    </div>
+    <div id="gp">🎮 Sin mando (conectalo y apretá un botón)</div>
+    <div class="kbd">Teclado: W/S o ↑/↓ · A/D o ←/→</div>
   </div>
-  <div class="pad">
+
+  <div class="pad ctl-btn">
     <div class="btn" data-k="left">◀</div>
     <div class="btn" data-k="right">▶</div>
   </div>
@@ -74,16 +123,29 @@ const CHR_B_CTL = 'd44bc439-abfd-45a2-b575-925416129600';
 const CHR_B_BAT = 'd44bc439-abfd-45a2-b575-925416129601';
 const KEY_B = new Uint8Array([0x34,0x52,0x2a,0x5b,0x7a,0x6e,0x49,0x2c,0x08,0x09,0x0a,0x9d,0x8d,0x2a,0x23,0xf8]);
 
-const st = { fwd:0, back:0, left:0, right:0, turbo:0, lights:0, donut:0 };
-let dev = null, ctl = null, gen = null, aesKey = null, timer = null, busy = false;
 const $ = id => document.getElementById(id);
 const log = m => { $('log').textContent = m; console.log(m); };
+const clamp = (v, a=-1, b=1) => Math.max(a, Math.min(b, v));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('autitos.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('autitos.' + k, JSON.stringify(v)); } catch {} }
+};
+
+// Toggles + teclas/botones (booleanos)
+const st = { fwd:0, back:0, left:0, right:0, turbo:0, lights:0, donut:0 };
+// Cada fuente aporta t (aceleración -1..1) y s (giro -1..1); gana la de mayor intensidad por eje
+const src = { keys:{t:0,s:0}, joy:{t:0,s:0}, tilt:{t:0,s:0}, pad:{t:0,s:0} };
+let speed = store.get('speed', 80);
+let out = { fwd:0, back:0, left:0, right:0, pct:0 };
+let pwmAcc = 0;
+
+let dev = null, ctl = null, gen = null, aesKey = null, timer = null, busy = false;
 
 // AES-ECB de un bloque usando AES-CBC con IV=0 (WebCrypto no expone ECB)
 const IV0 = new Uint8Array(16);
 async function ecbEnc(block) {
-  const out = await crypto.subtle.encrypt({name:'AES-CBC', iv:IV0}, aesKey, block);
-  return new Uint8Array(out).slice(0, 16);
+  const o = await crypto.subtle.encrypt({name:'AES-CBC', iv:IV0}, aesKey, block);
+  return new Uint8Array(o).slice(0, 16);
 }
 async function ecbDec(c) {
   // bloque extra que al descifrarse da padding PKCS7 válido (16 x 0x10)
@@ -93,20 +155,52 @@ async function ecbDec(c) {
   return new Uint8Array(await crypto.subtle.decrypt({name:'AES-CBC', iv:IV0}, aesKey, buf));
 }
 
+// ---- Mezcla de entradas -> salida ----
+function compute() {
+  let t = 0, s = 0;
+  for (const v of Object.values(src)) {
+    if (Math.abs(v.t) > Math.abs(t)) t = v.t;
+    if (Math.abs(v.s) > Math.abs(s)) s = v.s;
+  }
+  const mag = Math.min(1, Math.abs(t));
+  out.fwd = t > 0.12 ? 1 : 0;
+  out.back = t < -0.12 ? 1 : 0;
+  out.left = s < -0.35 ? 1 : 0;
+  out.right = s > 0.35 ? 1 : 0;
+  // % de potencia: entre 30% y la velocidad elegida según cuánto empujes; turbo = 100%
+  out.pct = (out.fwd || out.back) ? (st.turbo ? 100 : Math.round(30 + (speed - 30) * mag)) : 0;
+
+  for (const k of ['fwd','back','left','right'])
+    document.querySelector(`.btn[data-k="${k}"]`).classList.toggle('act', !!out[k]);
+  const dir = out.fwd ? '▲ Adelante' : out.back ? '▼ Atrás' : '';
+  const turn = out.left ? '◀ Izq' : out.right ? 'Der ▶' : '';
+  $('drive').textContent = dir ? dir + ' ' + out.pct + '%' + (turn ? ' · ' + turn : '') : (turn || 'Detenido');
+}
+
 function packetA() {
-  return new Uint8Array([1, st.fwd, st.back, st.left, st.right, st.lights, st.turbo, st.donut]);
+  // Gen A solo tiene encendido/apagado: la velocidad se regula pulsando el motor (PWM).
+  // Hasta 80% se modula; por encima va directo; 100% suma el turbo.
+  let on = 0;
+  if (out.pct) {
+    const duty = Math.min(1, out.pct / 80);
+    pwmAcc += duty;
+    if (pwmAcc >= 1) { pwmAcc -= 1; on = 1; }
+  } else pwmAcc = 0;
+  const turbo = out.pct >= 100 ? 1 : 0;
+  return new Uint8Array([1, out.fwd & on, out.back & on, out.left, out.right, st.lights, turbo, st.donut]);
 }
 async function packetB() {
   const p = new Uint8Array(16);
   p[1]=0x43; p[2]=0x54; p[3]=0x4c;           // "CTL"
-  p[4]=st.fwd; p[5]=st.fwd ? 0 : st.back;
-  p[6]=st.left; p[7]=st.left ? 0 : st.right;
+  p[4]=out.fwd; p[5]=out.fwd ? 0 : out.back;
+  p[6]=out.left; p[7]=out.left ? 0 : out.right;
   p[8]=st.lights ? 0 : 1;                     // luces: no confirmado
-  p[9]=st.turbo ? 0x64 : 0x50;                // velocidad (confirmado descifrando el keep-alive)
+  p[9]=out.pct || 0x50;                       // velocidad en % (0x50 = normal, 0x64 = turbo)
   return ecbEnc(p);
 }
 
 async function tick() {
+  compute();
   if (!ctl || busy) return;
   busy = true;
   try {
@@ -116,6 +210,7 @@ async function tick() {
   busy = false;
 }
 
+// ---- Conexión ----
 async function connect() {
   if (dev && dev.gatt.connected) { dev.gatt.disconnect(); return; }
   try {
@@ -166,7 +261,7 @@ async function connect() {
     $('status').textContent = 'Conectado'; $('status').className = 'on';
     $('connect').textContent = 'Desconectar';
     log('Listo. Generación ' + gen);
-    timer = setInterval(tick, gen === 'A' ? 100 : 50);
+    timer = setInterval(tick, 50);
   } catch (e) {
     const m = e.name === 'NotFoundError'
       ? 'No elegiste ningún equipo. Si la lista está vacía: activá Ubicación, cerrá la app Shell y prendé/apagá el autito.'
@@ -181,15 +276,10 @@ function onDisc() {
   $('connect').textContent = 'Conectar'; $('bat').textContent = '🔋 --';
 }
 
-// ---- Controles ----
-function setKey(k, v) {
-  st[k] = v ? 1 : 0;
-  document.querySelector(`[data-k="${k}"]`)?.classList.toggle('act', !!v);
-  tick();
-}
-function toggle(k) {
-  st[k] ^= 1; $(k).classList.toggle('on', !!st[k]); tick();
-}
+// ---- Botones y teclado ----
+function updKeys() { src.keys.t = st.fwd - st.back; src.keys.s = st.right - st.left; tick(); }
+function setKey(k, v) { st[k] = v ? 1 : 0; updKeys(); }
+function toggle(k) { st[k] ^= 1; $(k).classList.toggle('on', !!st[k]); tick(); }
 document.querySelectorAll('.btn').forEach(b => {
   const k = b.dataset.k;
   b.addEventListener('pointerdown', e => { b.setPointerCapture(e.pointerId); setKey(k, 1); });
@@ -206,10 +296,137 @@ addEventListener('keydown', e => {
   else if (e.code === 'KeyT' && gen === 'A') toggle('donut');
 });
 addEventListener('keyup', e => { if (keymap[e.code]) setKey(keymap[e.code], 0); });
-addEventListener('blur', () => ['fwd','back','left','right'].forEach(k => setKey(k, 0)));
+
+// ---- Velocidad ----
+$('spd').value = speed; $('spdv').textContent = speed + '%';
+$('spd').addEventListener('input', e => {
+  speed = +e.target.value; $('spdv').textContent = speed + '%'; store.set('speed', speed); tick();
+});
+
+// ---- Modos ----
+function setMode(m) {
+  document.body.dataset.mode = m; store.set('mode', m);
+  document.querySelectorAll('.modes button').forEach(b => b.classList.toggle('on', b.dataset.m === m));
+  stopAll();
+  if (m === 'tilt') startTilt();
+}
+document.querySelectorAll('.modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
+
+// ---- Joystick ----
+function ringStick(el, onMove, onEnd) {
+  const knob = el.querySelector('.knob');
+  let id = null;
+  const move = e => {
+    const r = el.getBoundingClientRect(), R = r.width / 2;
+    let x = (e.clientX - r.left - R) / R, y = (e.clientY - r.top - R) / R;
+    const d = Math.hypot(x, y); if (d > 1) { x /= d; y /= d; }
+    knob.style.transform = `translate(${x * R * 0.66}px, ${y * R * 0.66}px)`;
+    onMove(x, y);
+  };
+  el.addEventListener('pointerdown', e => { id = e.pointerId; try { el.setPointerCapture(id); } catch {} el.classList.add('act'); move(e); });
+  el.addEventListener('pointermove', e => { if (e.pointerId === id) move(e); });
+  const end = e => { if (e.pointerId !== id) return; id = null; el.classList.remove('act'); knob.style.transform = ''; onEnd(); };
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev => el.addEventListener(ev, end));
+}
+ringStick($('joy'),
+  (x, y) => { src.joy.s = Math.abs(x) < 0.15 ? 0 : x; src.joy.t = Math.abs(y) < 0.15 ? 0 : -y; tick(); },
+  () => { src.joy.t = src.joy.s = 0; tick(); });
+
+// ---- Inclinación ----
+// Gravedad en coordenadas de pantalla (tiene en cuenta si el celu está girado).
+let tiltOn = false, tiltHold = false, grav = null, base = { x:0, y:0 }, tiltGotData = false;
+let invS = store.get('invS', false), invT = store.get('invT', false);
+$('invS').classList.toggle('on', invS); $('invT').classList.toggle('on', invT);
+function screenGrav(a) {
+  const ang = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0;
+  switch ((ang + 360) % 360) {
+    case 90:  return { x: -a.y, y:  a.x };
+    case 180: return { x: -a.x, y: -a.y };
+    case 270: return { x:  a.y, y: -a.x };
+    default:  return { x:  a.x, y:  a.y };
+  }
+}
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x === null) return;
+  tiltGotData = true;
+  grav = screenGrav(a);
+  const dz = v => Math.abs(v) < 0.15 ? 0 : v;
+  // ~25° de inclinación = máximo
+  let s = clamp(-(grav.x - base.x) / 4.2), t = clamp(-(grav.y - base.y) / 4.2);
+  if (invS) s = -s; if (invT) t = -t;
+  const dot = $('tiltRing').querySelector('.knob'), R = $('tiltRing').clientWidth / 2;
+  dot.style.transform = `translate(${s * R * 0.75}px, ${-t * R * 0.75}px)`;
+  if (tiltHold) { src.tilt.s = dz(s); src.tilt.t = dz(t); } else { src.tilt.s = src.tilt.t = 0; }
+}
+async function startTilt() {
+  if (tiltOn) return;
+  try {
+    if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
+      if (await DeviceMotionEvent.requestPermission() !== 'granted') throw new Error('permiso denegado');
+    }
+    addEventListener('devicemotion', onMotion);
+    tiltOn = true;
+    $('tiltHint').textContent = 'Mantené apretado el círculo para manejar inclinando el celu';
+    setTimeout(() => {
+      if (!tiltGotData) $('tiltHint').textContent = 'Este dispositivo no envía datos de inclinación (en la PC no hay sensor).';
+      else calibrate();
+    }, 800);
+  } catch (e) { $('tiltHint').textContent = 'Sin acceso al sensor: ' + e.message; }
+}
+function calibrate() { if (grav) { base = { x: 0, y: grav.y }; log('Inclinación calibrada: esta posición es "quieto".'); } }
+$('calib').addEventListener('click', calibrate);
+$('invS').addEventListener('click', () => { invS = !invS; $('invS').classList.toggle('on', invS); store.set('invS', invS); });
+$('invT').addEventListener('click', () => { invT = !invT; $('invT').classList.toggle('on', invT); store.set('invT', invT); });
+const tr = $('tiltRing');
+tr.addEventListener('pointerdown', e => {
+  if (!tiltOn) startTilt();   // iPhone pide permiso con un toque; si falló al cargar, reintenta acá
+  try { tr.setPointerCapture(e.pointerId); } catch {}
+  tiltHold = true; tr.classList.add('act'); });
+['pointerup','pointercancel','lostpointercapture'].forEach(ev => tr.addEventListener(ev, () => {
+  tiltHold = false; tr.classList.remove('act'); src.tilt.t = src.tilt.s = 0; tick();
+}));
+
+// ---- Mando (Gamepad API, mapeo estándar Xbox/PlayStation) ----
+let gpPrev = [], gpLoop = false;
+function pollPad() {
+  const gp = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(g => g && g.connected);
+  if (!gp) { src.pad.t = src.pad.s = 0; gpLoop = false; $('gp').textContent = '🎮 Sin mando (conectalo y apretá un botón)'; tick(); return; }
+  const dz = (v, z=0.18) => Math.abs(v) < z ? 0 : v;
+  const btn = i => gp.buttons[i] ? gp.buttons[i].value : 0;
+  // Gatillo derecho acelera, izquierdo frena/atrás; si no, stick izquierdo vertical
+  let t = btn(7) - btn(6);
+  if (Math.abs(t) < 0.1) t = -dz(gp.axes[1] || 0);
+  let s = dz(gp.axes[0] || 0);
+  // Cruceta
+  if (btn(12)) t = 1; if (btn(13)) t = -1; if (btn(14)) s = -1; if (btn(15)) s = 1;
+  src.pad.t = clamp(t); src.pad.s = clamp(s);
+  // A = turbo, Y = luces, X = trompo (al apretar)
+  const press = i => gp.buttons[i] && gp.buttons[i].pressed && !gpPrev[i];
+  if (press(0)) toggle('turbo');
+  if (press(3)) toggle('lights');
+  if (press(2) && gen === 'A') toggle('donut');
+  gpPrev = gp.buttons.map(b => b.pressed);
+  $('gp').textContent = '🎮 ' + gp.id.replace(/\(.*?\)/g, '').trim().slice(0, 30) + ' · RT acelera, LT atrás, A turbo';
+  requestAnimationFrame(pollPad);
+}
+function startPad() { if (!gpLoop) { gpLoop = true; requestAnimationFrame(pollPad); } }
+addEventListener('gamepadconnected', startPad);
+addEventListener('gamepaddisconnected', () => setTimeout(startPad, 100));
+if (navigator.getGamepads && [...navigator.getGamepads()].some(Boolean)) startPad();
+
+// ---- Seguridad: si la página pierde el foco, frena todo ----
+function stopAll() {
+  ['fwd','back','left','right'].forEach(k => st[k] = 0);
+  for (const v of Object.values(src)) v.t = v.s = 0;
+  tiltHold = false; tick();
+}
+addEventListener('blur', stopAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopAll(); });
 
 $('connect').addEventListener('click', connect);
 if (!navigator.bluetooth) { $('nobt').style.display = 'block'; $('connect').disabled = true; }
+setMode(store.get('mode', 'btn'));
 </script>
 </body>
 </html>
