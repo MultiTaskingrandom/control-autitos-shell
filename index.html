@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Control Autitos Shell</title>
+<style>
+  :root { --bg:#111; --panel:#1c1c1c; --red:#d52b1e; --yellow:#ffd500; --txt:#eee; --mut:#888; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--txt); font-family:system-ui,sans-serif; touch-action:none; }
+  body { display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:10px; padding:10px 16px; background:var(--panel); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; color:var(--yellow); flex:1; }
+  #status { font-size:13px; color:var(--mut); }
+  #status.on { color:#4caf50; }
+  button { font:inherit; border:0; border-radius:10px; cursor:pointer; }
+  .top { background:var(--red); color:#fff; padding:8px 14px; font-weight:600; }
+  .tog { background:#333; color:#fff; padding:8px 14px; }
+  .tog.on { background:var(--yellow); color:#000; }
+  main { flex:1; display:flex; align-items:center; justify-content:space-between; padding:16px; gap:16px; }
+  .pad { display:flex; gap:14px; }
+  .pad.v { flex-direction:column; }
+  .btn { width:min(26vw,120px); height:min(26vw,120px); background:#2a2a2a; color:#fff; font-size:40px;
+         border-radius:20px; border:3px solid #444; display:flex; align-items:center; justify-content:center; }
+  .btn.act { background:var(--red); border-color:var(--yellow); }
+  .mid { display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center; font-size:13px; color:var(--mut); }
+  #bat { font-size:22px; color:var(--txt); }
+  #log { font-size:11px; color:var(--mut); padding:4px 16px 8px; min-height:18px; font-family:monospace; }
+  #nobt { display:none; background:#5a1a1a; padding:10px 16px; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="nobt">Este navegador no soporta Web Bluetooth. Usá Chrome o Edge (Android / Windows / Mac). En iPhone, la app "Bluefy".</div>
+<header>
+  <h1>🏎️ Autitos Shell</h1>
+  <span id="status">Desconectado</span>
+  <button class="top" id="connect">Conectar</button>
+</header>
+<main>
+  <div class="pad v">
+    <div class="btn" data-k="fwd">▲</div>
+    <div class="btn" data-k="back">▼</div>
+  </div>
+  <div class="mid">
+    <div id="bat">🔋 --</div>
+    <div id="model">—</div>
+    <button class="tog" id="turbo">Turbo (Espacio)</button>
+    <button class="tog" id="lights">Luces (L)</button>
+    <button class="tog" id="donut" hidden>Trompo (T)</button>
+    <div>Teclado: W/S o ↑/↓ · A/D o ←/→</div>
+  </div>
+  <div class="pad">
+    <div class="btn" data-k="left">◀</div>
+    <div class="btn" data-k="right">▶</div>
+  </div>
+</main>
+<div id="log"></div>
+
+<script>
+// ---- Protocolo ----
+// Gen A ("SL-", 2024+): 8 bytes sin cifrar en 0xFFF1.
+// Gen B ("QCAR-", Brandbase 2019-2020): 16 bytes "CTL" cifrados AES-128-ECB.
+const SVC_FFF0 = '0000fff0-0000-1000-8000-00805f9b34fb';
+const CHR_FFF1 = '0000fff1-0000-1000-8000-00805f9b34fb';
+const SVC_BAT  = '0000180f-0000-1000-8000-00805f9b34fb';
+const CHR_BAT  = '00002a19-0000-1000-8000-00805f9b34fb';
+const CHR_B_CTL = 'd44bc439-abfd-45a2-b575-925416129600';
+const CHR_B_BAT = 'd44bc439-abfd-45a2-b575-925416129601';
+const KEY_B = new Uint8Array([0x34,0x52,0x2a,0x5b,0x7a,0x6e,0x49,0x2c,0x08,0x09,0x0a,0x9d,0x8d,0x2a,0x23,0xf8]);
+
+const st = { fwd:0, back:0, left:0, right:0, turbo:0, lights:0, donut:0 };
+let dev = null, ctl = null, gen = null, aesKey = null, timer = null, busy = false;
+const $ = id => document.getElementById(id);
+const log = m => { $('log').textContent = m; console.log(m); };
+
+// AES-ECB de un bloque usando AES-CBC con IV=0 (WebCrypto no expone ECB)
+const IV0 = new Uint8Array(16);
+async function ecbEnc(block) {
+  const out = await crypto.subtle.encrypt({name:'AES-CBC', iv:IV0}, aesKey, block);
+  return new Uint8Array(out).slice(0, 16);
+}
+async function ecbDec(c) {
+  // bloque extra que al descifrarse da padding PKCS7 válido (16 x 0x10)
+  const pad = c.map(b => b ^ 0x10);
+  const c2 = await ecbEnc(pad);
+  const buf = new Uint8Array(32); buf.set(c); buf.set(c2, 16);
+  return new Uint8Array(await crypto.subtle.decrypt({name:'AES-CBC', iv:IV0}, aesKey, buf));
+}
+
+function packetA() {
+  return new Uint8Array([1, st.fwd, st.back, st.left, st.right, st.lights, st.turbo, st.donut]);
+}
+async function packetB() {
+  const p = new Uint8Array(16);
+  p[1]=0x43; p[2]=0x54; p[3]=0x4c;           // "CTL"
+  p[4]=st.fwd; p[5]=st.fwd ? 0 : st.back;
+  p[6]=st.left; p[7]=st.left ? 0 : st.right;
+  p[8]=st.lights ? 0 : 1;                     // luces: no confirmado
+  p[9]=st.turbo ? 0x64 : 0x50;                // velocidad (confirmado descifrando el keep-alive)
+  return ecbEnc(p);
+}
+
+async function tick() {
+  if (!ctl || busy) return;
+  busy = true;
+  try {
+    const data = gen === 'A' ? packetA() : await packetB();
+    await ctl.writeValueWithoutResponse(data);
+  } catch (e) { log('Error enviando: ' + e.message); }
+  busy = false;
+}
+
+async function connect() {
+  if (dev && dev.gatt.connected) { dev.gatt.disconnect(); return; }
+  try {
+    dev = await navigator.bluetooth.requestDevice({
+      filters: [{namePrefix:'SL-'}, {namePrefix:'QCAR-'}, {services:[SVC_FFF0]}],
+      optionalServices: [SVC_FFF0, SVC_BAT]
+    });
+    dev.addEventListener('gattserverdisconnected', onDisc);
+    $('status').textContent = 'Conectando…';
+    const srv = await dev.gatt.connect();
+    const svc = await srv.getPrimaryService(SVC_FFF0);
+
+    // Detecta generación por las características disponibles
+    try { ctl = await svc.getCharacteristic(CHR_FFF1); gen = 'A'; }
+    catch { ctl = await svc.getCharacteristic(CHR_B_CTL); gen = 'B'; }
+
+    if (gen === 'B') {
+      aesKey = await crypto.subtle.importKey('raw', KEY_B, 'AES-CBC', false, ['encrypt','decrypt']);
+      try {
+        const b = await svc.getCharacteristic(CHR_B_BAT);
+        b.addEventListener('characteristicvaluechanged', async ev => {
+          const p = await ecbDec(new Uint8Array(ev.target.value.buffer));
+          if (p[1]===0x56 && p[2]===0x42 && p[3]===0x54) $('bat').textContent = '🔋 ' + p[4] + '%';
+        });
+        await b.startNotifications();
+      } catch (e) { log('Sin batería: ' + e.message); }
+    } else {
+      try {
+        const bs = await srv.getPrimaryService(SVC_BAT);
+        const b = await bs.getCharacteristic(CHR_BAT);
+        const show = v => $('bat').textContent = '🔋 ' + v.getUint8(0) + '%';
+        show(await b.readValue());
+        b.addEventListener('characteristicvaluechanged', ev => show(ev.target.value));
+        b.startNotifications().catch(()=>{});
+      } catch (e) { log('Sin batería: ' + e.message); }
+    }
+
+    $('donut').hidden = gen !== 'A';
+    $('model').textContent = (dev.name || 'Autito') + ' · protocolo ' + gen;
+    $('status').textContent = 'Conectado'; $('status').className = 'on';
+    $('connect').textContent = 'Desconectar';
+    log('Listo. Generación ' + gen);
+    timer = setInterval(tick, gen === 'A' ? 100 : 50);
+  } catch (e) { log('No se pudo conectar: ' + e.message); onDisc(); }
+}
+
+function onDisc() {
+  clearInterval(timer); timer = null; ctl = null; gen = null;
+  $('status').textContent = 'Desconectado'; $('status').className = '';
+  $('connect').textContent = 'Conectar'; $('bat').textContent = '🔋 --';
+}
+
+// ---- Controles ----
+function setKey(k, v) {
+  st[k] = v ? 1 : 0;
+  document.querySelector(`[data-k="${k}"]`)?.classList.toggle('act', !!v);
+  tick();
+}
+function toggle(k) {
+  st[k] ^= 1; $(k).classList.toggle('on', !!st[k]); tick();
+}
+document.querySelectorAll('.btn').forEach(b => {
+  const k = b.dataset.k;
+  b.addEventListener('pointerdown', e => { b.setPointerCapture(e.pointerId); setKey(k, 1); });
+  ['pointerup','pointercancel','lostpointercapture'].forEach(ev => b.addEventListener(ev, () => setKey(k, 0)));
+});
+['turbo','lights','donut'].forEach(k => $(k).addEventListener('click', () => toggle(k)));
+const keymap = { KeyW:'fwd', ArrowUp:'fwd', KeyS:'back', ArrowDown:'back',
+                 KeyA:'left', ArrowLeft:'left', KeyD:'right', ArrowRight:'right' };
+addEventListener('keydown', e => {
+  if (e.repeat) return;
+  if (keymap[e.code]) { setKey(keymap[e.code], 1); e.preventDefault(); }
+  else if (e.code === 'Space') { toggle('turbo'); e.preventDefault(); }
+  else if (e.code === 'KeyL') toggle('lights');
+  else if (e.code === 'KeyT' && gen === 'A') toggle('donut');
+});
+addEventListener('keyup', e => { if (keymap[e.code]) setKey(keymap[e.code], 0); });
+addEventListener('blur', () => ['fwd','back','left','right'].forEach(k => setKey(k, 0)));
+
+$('connect').addEventListener('click', connect);
+if (!navigator.bluetooth) { $('nobt').style.display = 'block'; $('connect').disabled = true; }
+</script>
+</body>
+</html>
